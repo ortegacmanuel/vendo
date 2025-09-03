@@ -1,0 +1,93 @@
+version: '3.9'
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports: [ "${POSTGRES_PORT}:5432" ]
+    volumes: [ "pg_data:/var/lib/postgresql/data", "./infra/sql/cart:/docker-entrypoint-initdb.d" ]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  mysql:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    ports: [ "${MYSQL_PORT}:3306" ]
+    volumes: [ "mysql_data:/var/lib/mysql", "./infra/sql/inventory:/docker-entrypoint-initdb.d" ]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 25
+  redis:
+    image: redis:7
+    ports: [ "${REDIS_PORT}:6379" ]
+  mongo:
+    image: mongo:6
+    ports: [ "${MONGO_PORT}:27017" ]
+    volumes: [ "mongo_data:/data/db" ]
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    ports: [ "${RABBITMQ_PORT_AMQP}:5672", "${RABBITMQ_PORT_UI}:15672" ]
+  localstack:
+    image: localstack/localstack:2.3
+    environment: [ "SERVICES=dynamodb,sns,sqs", "AWS_DEFAULT_REGION=${AWS_REGION}", "LS_LOG=warn" ]
+    ports: [ "${LOCALSTACK_PORT}:4566" ]
+    profiles: [ "aws" ]
+
+  cart:
+    build: ./services/cart
+    environment:
+      DATABASE_URL: ${DATABASE_URL_CART}
+      AMQP_URL: ${AMQP_URL}
+      INV_EXCHANGE: ${INV_EXCHANGE}
+      INV_QUEUE: ${INV_QUEUE}
+      INV_ROUTING: ${INV_ROUTING}
+      REDIS_URL: ${REDIS_URL}
+      MONGO_URL: ${MONGO_URL}
+    depends_on:
+      postgres: { condition: service_started }
+      rabbitmq: { condition: service_started }
+      redis: { condition: service_started }
+      mongo: { condition: service_started }
+    ports: [ "9292:9292" ]
+
+  inventory:
+    build: ./services/inventory
+    environment:
+      DATABASE_URL: ${DATABASE_URL_INVENTORY}
+      AMQP_URL: ${AMQP_URL}
+    depends_on:
+      mysql: { condition: service_started }
+      rabbitmq: { condition: service_started }
+    ports: [ "9393:9393" ]
+
+  warehouse:
+    build: ./services/warehouse
+    environment:
+      DATABASE_URL: ${DATABASE_URL_INVENTORY}
+      AMQP_URL: ${AMQP_URL}
+    depends_on:
+      mysql: { condition: service_started }
+      rabbitmq: { condition: service_started }
+
+  react-app:
+    build: ./web/react-app
+    ports: [ "3000:3000" ]
+    environment:
+      VITE_CART_API_URL: http://localhost:9292
+    depends_on:
+      cart: { condition: service_started }
+    profiles: [ "web" ]
+
+volumes: { pg_data: {}, mysql_data: {}, mongo_data: {} }
