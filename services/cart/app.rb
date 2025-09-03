@@ -3,7 +3,6 @@ require 'bundler/setup'
 
 require 'eventstore_ruby'
 require 'sinatra'
-require 'dotenv/load'
 require_relative 'lib/registry'
 require_relative 'lib/container'
 require "sinatra/reloader" if development?
